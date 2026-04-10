@@ -14,12 +14,12 @@
 
 
     //Configurar API
-    $apiKey = $_ENV['sk-1d870514bc95443bbfdd9abd6c6ccefa'];
+    $apiKey = $_ENV['HF_API_KEY'];
+    $modeUrl = "https//api-inference.huggingface.co/models/mistralai/Mistral-7B-instruct-v0.3";
+    $json = file_get_contents("php://input");
+    $data = json_decode($json, true);
+    $userMessage = $data["message"] ?? "";
 
-    $client = OpenAI::factory()
-    ->withApiKey($apiKey)
-    ->withBaseUri('https://api.deepseek.com/v1')
-    ->make();
 
     if(empty($userMessage)){
         echo json_encode(['error'=> 'Mensagem vazia ou inválida.']);
@@ -28,6 +28,9 @@
 
     //Histórico
     $memoryPath = __DIR__ . '/../memory/chat_history.json';
+    if (!is_dir(__DIR__ . '/../memory')) {
+        mkdir(__DIR__ . '/../memory', 0777, true);
+    }
 
     $history = [];
     if (file_exists($memoryPath)){
@@ -37,43 +40,25 @@
     $history[] = ['role' => 'user', 'content' => $userMessage];
 //Chamada pra IA
     try {
-        //Definir o comportamento do mentor
-        $systemPrompt = [
-            //Protocolos: User: a pessoa que irá interagir
-            //Assistant: a IA respondendo
-            //System: quem define a regra do jogo. "Mestre"
-            //content: moldo a personalidade do meu mentor
-            'role' => 'system', 
-            'content' => 'Você é um mentor de Desenvolvimento Web especialista.'.
-                        'Ajude o aluno com PHP, HTML, CSS e JS'.
-                        'Sempre mostre exemplos de códigos formatados com Markdown e explique a lógica de forma simples e didática'
-        ];
+        $systemText = "Você um mentor de Desenvolvimento Web especialista. Ajude o alunocom PHP, CSS, HTML";
 
-        //Mesclar o prompt do sistema com o histórico guardado
-        $messages = array_merge([$systemPrompt], $history);
+        $fullPrompt =  "<s>[INST] $systemText \n Histórico: " . json_encode($history) . "[/INST]";
 
-        $response = $client->chat()->create([
-            'model' => 'deepseek-chat',
-            'messages' => $messages,
-            'temperature' => 0.7 // equilíbrio entre criatividade e precisão
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $modelUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, $true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            "Authorization: Bearer $apiKey",
+            "Content-Type: application/json"
         ]);
-
-        $botReply = $response ->choices[0]->message->content;
-
-        //Atualiza e salva o histórico
-        $history[] = ['role' => 'assistant', 'content' =>$botReply];
-
-        //ultimas 10 msgs para n estourar o limite de tokes da API
-        if (count($history) >10) {
-            $history = array_slice($history, -10);
-        }
-
-        file_put_contents($memoryPath, json_encode($history, JSON_PRETTY_PRINT));
-
-        echo json_enconde(['reply' => $botReply]);
-
-    } catch(Exception $e) {
-        echo json_encode(['error' => 'Erro na API: '. $e->getMessage()]);
+        
+        $payload = [
+            'inputs' => $fullPrompt,
+            'Parameters' => [
+                'max_new_tokens' => 500,
+                'return_full_text' => false
+            ]
+        ]
     }
-
 ?>
